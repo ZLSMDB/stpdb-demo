@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	db "github.com/Tsan1024/stpdb/src"
+	db "github.com/ZLSMDB/stpdb-demo/src"
 )
 
 func main() {

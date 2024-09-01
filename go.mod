@@ -1,4 +1,4 @@
-module github.com/ZLSMDB/stpdb
+module github.com/ZLSMDB/stpdb-demo
 
 go 1.20
 
