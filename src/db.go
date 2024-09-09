@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -68,6 +70,8 @@ func (ldb *LevelDB) ExportPrefixToFile(prefix []byte) error {
 	ldb.lock.RLock()
 	defer ldb.lock.RUnlock()
 
+	start := time.Now()
+
 	filename := fmt.Sprintf("%s.stp", prefix)
 	file, err := os.Create(filename)
 	if err != nil {
@@ -81,7 +85,8 @@ func (ldb *LevelDB) ExportPrefixToFile(prefix []byte) error {
 	for iter.Next() {
 		key := iter.Key()
 		value := iter.Value()
-		line := fmt.Sprintf("%s:%s\n", key, value)
+		line := fmt.Sprintf("#%s=%s;\n", key[len(prefix)+1:], value)
+		// line := fmt.Sprintf("%s:%s\n", key, value)
 		if _, err := file.WriteString(line); err != nil {
 			return err
 		}
@@ -90,30 +95,89 @@ func (ldb *LevelDB) ExportPrefixToFile(prefix []byte) error {
 	if err := iter.Error(); err != nil {
 		return err
 	}
+	// 计算导出时间
+	elapsed := time.Since(start)
+	fmt.Printf("Data with prefix '%s' exported to %s successfully in %v seconds.\n", prefix, filename, elapsed.Seconds())
 	return nil
 }
 
-// ImportFromFile loads key-value pairs from a file into the LevelDB.
-func (ldb *LevelDB) ImportFromFile(filename string) error {
-	file, err := os.Open(filename)
+// // ImportFromFile loads key-value pairs from a file into the LevelDB.
+// func (ldb *LevelDB) ImportFromFile(filename string) error {
+// 	file, err := os.Open(filename)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer file.Close()
+
+// 	scanner := bufio.NewScanner(file)
+// 	for scanner.Scan() {
+// 		line := scanner.Text()
+// 		parts := strings.SplitN(line, ":", 2)
+// 		if len(parts) != 2 {
+// 			continue // Skip malformed lines
+// 		}
+// 		key := []byte(parts[0])
+// 		value := []byte(parts[1])
+// 		ldb.Put(key, value)
+// 	}
+
+// 	return scanner.Err()
+// }
+
+// ParseStepFile 解析 STEP 文件，返回所有的键值对
+func (ldb *LevelDB) ParseStepFile(filepath string) (map[string]string, error) {
+	// 记录解析开始时间
+	start := time.Now()
+	file, err := os.Open(filepath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer file.Close()
+
+	// 存储解析出的键值对
+	parsedData := make(map[string]string)
+	// 正则表达式匹配 STEP 文件行
+	re := regexp.MustCompile(`#(\d+)=(.+);`)
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
-			continue // Skip malformed lines
+		matches := re.FindStringSubmatch(line)
+		if len(matches) != 3 {
+			continue // 跳过不匹配的行
 		}
-		key := []byte(parts[0])
-		value := []byte(parts[1])
-		ldb.Put(key, value)
+		key := matches[1]
+		value := matches[2]
+		parsedData[key] = value
 	}
 
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	// 记录解析结束时间并计算耗时
+	elapsed := time.Since(start)
+	fmt.Printf("Time taken to parse step data to kv pairs: %v seconds\n", elapsed.Seconds())
+	return parsedData, nil
+}
+
+// StoreParsedData 存储解析出的键值对到 LevelDB 中
+func (ldb *LevelDB) StoreParsedData(data map[string]string, stepFileName string) error {
+	// 记录存储开始时间
+	start := time.Now()
+
+	for key, value := range data {
+		// 为 key 添加文件名前缀
+		fullKey := stepFileName + "_" + key
+		err := ldb.Put([]byte(fullKey), []byte(value))
+		if err != nil {
+			return err
+		}
+	}
+
+	// 记录存储结束时间并计算耗时
+	elapsed := time.Since(start)
+	fmt.Printf("Time taken to store data in LevelDB: %v seconds\n", elapsed.Seconds())
+	return nil
 }
 
 // ModifyValueInFile modifies the value of a specific key in a file and writes the changes back.
